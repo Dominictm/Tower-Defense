@@ -111,6 +111,20 @@ const GRID_X = 16, GRID_Y = 12;
 const START_MONEY = 400, START_LIVES = 20, WAVE_COOLDOWN = 12;
 const SPAWN_INTERVAL = 0.7;
 
+const PALETTE = {
+  grassBase: 0x6bbf4a,
+  grassPatch: 0x5aa840,
+  grassEdge: 0x7cc95a,
+  roadBase: 0xd9b380,
+  roadDark: 0xb8895a,
+  slotBase: 0xe8e4c8,
+  towerWarm: 0xa06a4a,
+  towerCool: 0x7f9fc9,
+  stoneDark: 0x54525e,
+  magicAccent: 0x7b4aa8,
+  skySoft: 0xcfe8ff
+};
+
 const TOWERS = [
   { id:'ice',    name:'Лёд',    icon:'❄️', price:100, dmg:12, rate:1.2, range:3.0, color:0x79cfff, desc:'Замедление 40% на 2с' },
   { id:'fire',   name:'Огонь',  icon:'🔥', price:150, dmg:20, rate:0.8, range:2.8, color:0xff7a3c, desc:'Урон по площади + горение' },
@@ -268,15 +282,17 @@ function g(key, factory){
   return GEO[key];
 }
 function geoCube(){ return g('cube', () => new THREE.BoxGeometry(1, 1, 1)); }
-function geoSphere(){ return g('sphere', () => new THREE.SphereGeometry(0.5, 12, 8)); }
-function geoCone(){ return g('cone', () => new THREE.ConeGeometry(0.5, 1, 10)); }
-function geoCyl(){ return g('cyl', () => new THREE.CylinderGeometry(0.5, 0.5, 1, 12)); }
-function geoIco(){ return g('ico', () => new THREE.IcosahedronGeometry(0.5, 0)); }
+function geoSphere(){ return g('sphere', () => new THREE.SphereGeometry(0.5, 16, 12)); }
+function geoCone(){ return g('cone', () => new THREE.ConeGeometry(0.5, 1, 14)); }
+function geoCyl(){ return g('cyl', () => new THREE.CylinderGeometry(0.5, 0.5, 1, 16)); }
+function geoIco(){ return g('ico', () => new THREE.IcosahedronGeometry(0.5, 1)); }
 function geoTetra(){ return g('tetra', () => new THREE.TetrahedronGeometry(0.5)); }
 function geoPlane(){ return g('plane', () => new THREE.PlaneGeometry(1, 1)); }
-function geoCap(){ return g('cap', () => new THREE.CapsuleGeometry(0.35, 0.6, 4, 8)); }
+function geoCap(){ return g('cap', () => new THREE.CapsuleGeometry(0.35, 0.6, 6, 12)); }
 function geoRing(){ return g('fxring', () => new THREE.RingGeometry(0.92, 1, 28)); }
 function geoSphereFine(){ return g('spheref', () => new THREE.SphereGeometry(0.5, 16, 12)); }
+function geoCylSeg(rTop, rBot, h, seg, key){ return g(key, () => new THREE.CylinderGeometry(rTop, rBot, h, seg)); }
+function geoHex(r, h){ return g('hex' + r + '_' + h, () => new THREE.CylinderGeometry(r, r, h, 6)); }
 
 function disposeObj(obj){
   obj.traverse(o => {
@@ -446,8 +462,8 @@ function initScene(){
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xbfe3ff);
-  scene.fog = new THREE.Fog(0xbfe3ff, 34, 80);
+  scene.background = new THREE.Color(PALETTE.skySoft);
+  scene.fog = new THREE.Fog(PALETTE.skySoft, 34, 80);
 
   camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
   camera.position.set(9, 14, 14);
@@ -499,24 +515,75 @@ function updateMapNameUI(){
   document.getElementById('mapname-start').textContent = 'Карта: ' + mn;
 }
 
+function waveY(x, z, seed){
+  const rnd = seededRand(seed);
+  const a = 0.02 + rnd() * 0.015;
+  const f1 = 0.6 + rnd() * 0.5, f2 = 0.7 + rnd() * 0.4;
+  const p1 = rnd() * 6.28, p2 = rnd() * 6.28;
+  return a * Math.sin(x * f1 + p1) * Math.cos(z * f2 + p2);
+}
+
 function buildMap(){
   const mapGroup = sceneHas.map;
   const m = currentMap;
 
-  const grass = new THREE.Mesh(geoCube(), mat(0x6fbf4d));
-  grass.scale.set(GRID_X, 0.4, GRID_Y);
-  grass.position.set(GRID_X / 2, -0.2, GRID_Y / 2);
+  const grassGeo = new THREE.PlaneGeometry(GRID_X, GRID_Y, 24, 18);
+  const seed = currentMap.seed;
+  const pos = grassGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++){
+    pos.setY(i, waveY(pos.getX(i), pos.getZ(i), seed));
+  }
+  grassGeo.computeVertexNormals();
+  const grass = new THREE.Mesh(grassGeo, new THREE.MeshLambertMaterial({
+    color: PALETTE.grassBase, flatShading: true, side: THREE.DoubleSide
+  }));
+  grass.rotation.x = -Math.PI / 2;
+  grass.position.set(GRID_X / 2, 0, GRID_Y / 2);
   grass.receiveShadow = true;
   mapGroup.add(grass);
 
-  const roadMesh = new THREE.Mesh(geoCube(), mat(0xd9b380));
+  const edgeMat = new THREE.MeshLambertMaterial({ color: PALETTE.grassEdge });
+  const border = new THREE.Mesh(geoCube(), edgeMat);
+  border.scale.set(GRID_X, 0.14, GRID_Y);
+  border.position.set(GRID_X / 2, -0.07, GRID_Y / 2);
+  border.receiveShadow = true;
+  mapGroup.add(border);
+
+  const patchRnd = seededRand(seed * 7 + 13);
+  for (let j = 0; j < GRID_Y / 2; j++){
+    for (let i = 0; i < GRID_X / 2; i++){
+      const r = patchRnd();
+      if (r < 0.3){
+        const px = i * 2 + 1 + (patchRnd() - 0.5) * 1.2;
+        const pz = j * 2 + 1 + (patchRnd() - 0.5) * 1.2;
+        const key = cellKey(Math.floor(px), Math.floor(pz));
+        if (roadSet.has(key) || slotSet.has(key)) continue;
+        const patch = new THREE.Mesh(geoPlane(), new THREE.MeshLambertMaterial({
+          color: r < 0.15 ? PALETTE.grassPatch : PALETTE.grassEdge,
+          transparent: true, opacity: 0.5
+        }));
+        patch.rotation.x = -Math.PI / 2;
+        patch.scale.set(1.2 + patchRnd() * 1.2, 1.2 + patchRnd() * 1.2, 1);
+        patch.position.set(px, 0.02 + waveY(px - GRID_X / 2, pz - GRID_Y / 2, seed) * 0.5 + 0.01, pz);
+        mapGroup.add(patch);
+      }
+    }
+  }
+
+  const roadMesh = new THREE.Mesh(geoCube(), mat(PALETTE.roadBase));
   roadMesh.scale.set(1, ROAD_H, 1);
   roadMesh.position.y = ROAD_Y;
   roadMesh.receiveShadow = true;
+  const roadEdgeMesh = new THREE.Mesh(geoCube(), mat(PALETTE.roadDark));
+  roadEdgeMesh.scale.set(1.06, 0.03, 1.06);
+  roadEdgeMesh.position.y = ROAD_Y - 0.005;
   for (const [i, j] of m.road){
     const rm = roadMesh.clone();
     rm.position.set(i + 0.5, ROAD_Y, j + 0.5);
     mapGroup.add(rm);
+    const re = roadEdgeMesh.clone();
+    re.position.set(i + 0.5, ROAD_Y - 0.01, j + 0.5);
+    mapGroup.add(re);
   }
 
   buildSlots(mapGroup);
@@ -526,7 +593,7 @@ function buildMap(){
 }
 
 function buildSlots(group){
-  const plate = new THREE.Mesh(geoCube(), mat(0xe8e4c8));
+  const plate = new THREE.Mesh(geoCube(), mat(PALETTE.slotBase));
   plate.scale.set(0.9, SLOT_H, 0.9);
   const high = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.98), new THREE.MeshBasicMaterial({
     color: 0x2ecc71, transparent: true, opacity: 0.55, visible: false
@@ -547,11 +614,11 @@ function buildSlots(group){
 
 function buildBase(group){
   const base = new THREE.Group();
-  const pad = new THREE.Mesh(geoCyldy(1.15, 0.12), mat(0x8a8578));
+  const pad = new THREE.Mesh(geoHex(1.15, 0.12), mat(PALETTE.towerWarm));
   pad.position.y = 0.06; pad.receiveShadow = true;
   base.add(pad);
-  const stone = mat(0x9aa0a8);
-  const stoneDark = mat(0x747a82);
+  const stone = mat(PALETTE.towerCool);
+  const stoneDark = mat(PALETTE.stoneDark);
   const roof = mat(0xc24a3a);
   const wood = mat(0x6d4a2f);
   // угловые башни
@@ -632,7 +699,7 @@ function buildPortal(group){
   const dark = new THREE.Mesh(geocircle(0.55), new THREE.MeshBasicMaterial({ color: 0x251933 }));
   dark.position.y = 1.1;
   portal.add(dark);
-  const ring = new THREE.Mesh(g('torus', () => new THREE.TorusGeometry(0.55, 0.12, 8, 20)), mat(0x7b4aa8));
+  const ring = new THREE.Mesh(g('torus', () => new THREE.TorusGeometry(0.55, 0.12, 8, 20)), mat(PALETTE.magicAccent));
   ring.rotation.x = Math.PI / 2;
   ring.position.y = 1.1;
   portal.add(ring);
@@ -673,26 +740,47 @@ function decorPine(){
   const trunk = new THREE.Mesh(geoCyl(), mat(0x8a5a33));
   trunk.scale.set(0.16, 0.3, 0.16); trunk.position.y = 0.3;
   p.add(trunk);
-  const green = mat(0x2e7d32);
-  const l1 = new THREE.Mesh(geoCone(), green);
+  const greens = [mat(0x2e7d32), mat(0x3a8a3e), mat(0x26742a)];
+  const l1 = new THREE.Mesh(geoCone(), greens[0]);
   l1.scale.set(0.55, 0.55, 0.55); l1.position.y = 0.55; p.add(l1);
-  const l2 = l1.clone(); l2.scale.multiplyScalar(0.75); l2.position.y = 0.95; p.add(l2);
-  const l3 = l1.clone(); l3.scale.multiplyScalar(0.5); l3.position.y = 1.28; p.add(l3);
+  const l2 = new THREE.Mesh(geoCone(), greens[1]);
+  l2.scale.set(0.41, 0.41, 0.41); l2.position.y = 0.95; p.add(l2);
+  const l3 = new THREE.Mesh(geoCone(), greens[2]);
+  l3.scale.set(0.28, 0.28, 0.28); l3.position.y = 1.28; p.add(l3);
   return p;
 }
 function decorBush(){
-  const b = new THREE.Mesh(geoSphere(), mat(0x3f9b4d));
-  b.scale.set(0.9, 0.65, 0.9); b.position.y = 0.32;
+  const b = new THREE.Group();
+  const tone = [0x3f9b4d, 0x4aaa58, 0x359445];
+  for (let i = 0; i < 3; i++){
+    const m = new THREE.Mesh(geoSphere(), mat(tone[i]));
+    m.scale.set(0.56 - i * 0.04, 0.4 - i * 0.03, 0.56 - i * 0.04);
+    m.position.set((i - 1) * 0.2, 0.24 + i * 0.1, (i - 1) * 0.12);
+    b.add(m);
+  }
   return b;
 }
 function decorRock(){
-  const r = new THREE.Mesh(geoIco(), mat(0x9a9ea6));
-  r.scale.set(0.6, 0.45, 0.55); r.position.y = 0.3;
+  const r = new THREE.Group();
+  const tone = [0x9a9ea6, 0x8a8e96, 0xa5a9b2];
+  for (let i = 0; i < 3; i++){
+    const m = new THREE.Mesh(geoIco(), mat(tone[i]));
+    const sc = 0.38 - i * 0.06;
+    m.scale.set(sc, sc * 0.75, sc * 0.9);
+    m.position.set((i - 1) * 0.22, i * 0.08, (i - 1) * 0.15);
+    m.rotation.y = i * 1.1;
+    r.add(m);
+  }
   return r;
 }
 function decorHill(){
-  const h = new THREE.Mesh(geoSphere(), mat(0x74b54e));
-  h.scale.set(1.2, 0.7, 1.2); h.position.y = 0.4;
+  const h = new THREE.Group();
+  for (let i = 0; i < 2; i++){
+    const m = new THREE.Mesh(geoSphere(), mat(i ? 0x74b54e : 0x7fbf57));
+    m.scale.set(1.2 - i * 0.3, 0.7, 1.2 - i * 0.3);
+    m.position.set(i * 0.3, 0.4, i * 0.2);
+    h.add(m);
+  }
   return h;
 }
 
@@ -742,8 +830,13 @@ function buildMonsterMesh(type){
     group.add(torso); parts.torso = torso;
     const belly = new THREE.Mesh(geoSphere(), body);
     belly.scale.set(0.62, 0.6, 0.5); belly.position.set(0, 1.05, 0.3); group.add(belly);
-    const chest = new THREE.Mesh(geoCube(), mat(0x9a8b76));
+    const chest = new THREE.Mesh(geoCube(), mat(0xb3a58f));
     chest.scale.set(0.6, 0.42, 0.12); chest.position.set(0, 1.36, 0.36); group.add(chest);
+    const plateL = new THREE.Mesh(geoCube(), mat(0xb3a58f));
+    plateL.scale.set(0.24, 0.18, 0.1); plateL.position.set(0.24, 1.22, 0.34); group.add(plateL);
+    const plateR = plateL.clone(); plateR.position.x = -0.24; group.add(plateR);
+    const strap = new THREE.Mesh(geoCube(), dark);
+    strap.scale.set(0.62, 0.06, 0.04); strap.position.set(0, 1.3, 0.43); group.add(strap);
     const armL = limbPivot(group, 0.68, 1.45, 0.72, 0.2, body); parts.armL = armL;
     const armR = limbPivot(group, -0.68, 1.45, 0.72, 0.2, body); parts.armR = armR;
     const head = new THREE.Mesh(geoSphere(), body);
@@ -790,6 +883,12 @@ function buildMonsterMesh(type){
     const wr = wingMesh(body, -1); wr.position.set(0, 1.3, 0.7); wr.scale.set(1.5, 1.5, 1.5); group.add(wr); parts.wingR = wr;
     const t1 = new THREE.Mesh(geoCyl(), body);
     t1.scale.set(0.26, 0.7, 0.26); t1.rotation.x = 0.4; t1.position.set(0, 0.85, -1.1); group.add(t1);
+    const scaleMat = mat(0xe06066);
+    for (const [dx, dz] of [[0.26, -0.2], [-0.26, -0.2], [0, -0.55], [0.22, 0.32], [-0.22, 0.32]]){
+      const sc = new THREE.Mesh(geoTetra(), scaleMat);
+      sc.scale.setScalar(0.14); sc.position.set(dx, 1.15, dz); sc.rotation.y = Math.PI / 2;
+      sc.rotation.z = Math.random() * 0.4; group.add(sc);
+    }
     const t2 = new THREE.Mesh(geoCone(), body);
     t2.scale.set(0.2, 0.5, 0.2); t2.rotation.x = 0.9; t2.rotation.z = Math.PI; t2.position.set(0, 0.75, -1.6); group.add(t2);
     const tailSpike = new THREE.Mesh(geoCone(), mat(0xd8c9a3));
@@ -1013,11 +1112,20 @@ function buildTowerMesh(type, lv){
   const bodyMat = mat(type.color);
   const darkMat = mat(0x44404a);
   const metalMat = mat(0x666c76);
-  const base = new THREE.Mesh(geoCyl(), darkMat);
-  base.scale.set(1, 0.28, 1); base.position.y = 0.14; base.castShadow = true;
+  const warm = (type.id === 'fire' || type.id === 'poison' || type.id === 'cannon');
+  const baseMat = mat(warm ? PALETTE.towerWarm : PALETTE.towerCool);
+  const base = new THREE.Mesh(geoHex(0.6, 0.15), baseMat);
+  base.position.y = 0.075; base.castShadow = true;
   group.add(base);
+  const plinth = new THREE.Mesh(geoCyl(), darkMat);
+  plinth.scale.set(0.55, 0.14, 0.55); plinth.position.y = 0.2; group.add(plinth);
+  const rail = new THREE.Mesh(g('rail', () => new THREE.TorusGeometry(0.52, 0.03, 6, 16)), metalMat);
+  rail.rotation.x = Math.PI / 2; rail.position.y = 0.32; group.add(rail);
+  const seam1 = new THREE.Mesh(geoCyl(), darkMat);
+  seam1.scale.set(0.34, 0.03, 0.34); seam1.position.y = 0.45; group.add(seam1);
+  const seam2 = seam1.clone(); seam2.position.y = 0.58; group.add(seam2);
   const ring0 = new THREE.Mesh(g('torus2', () => new THREE.TorusGeometry(0.55, 0.05, 8, 18)), mat(0xffe14a));
-  ring0.rotation.x = Math.PI / 2; ring0.position.y = 0.05; ring0.visible = lv >= 2;
+  ring0.rotation.x = Math.PI / 2; ring0.position.y = 0.12; ring0.visible = lv >= 2;
   group.add(ring0);
   const s = 1 + 0.14 * (lv - 1);
   if (type.id === 'ice'){
@@ -2141,6 +2249,30 @@ function runTests(){
     }
     test(m.id + ' path waypoints', m.path.length >= 4);
     test(m.id + ' fly path', m.fly.length === 2);
+  }
+
+  // Design iteration tests
+  test('waveY deterministic', waveY(1.5, 2.3, 20260914) === waveY(1.5, 2.3, 20260914));
+  test('waveY amplitude < 0.05', Math.abs(waveY(3.7, 5.1, 20260914)) < 0.05);
+  const paletteKeys = ['grassBase', 'grassPatch', 'grassEdge', 'roadBase', 'roadDark', 'slotBase', 'towerWarm', 'towerCool', 'stoneDark', 'magicAccent', 'skySoft'];
+  for (const k of paletteKeys) test('palette ' + k, typeof PALETTE[k] === 'number');
+
+  if (hasDom){
+    for (const m of MAPS){
+      currentMap = m;
+      applyMapData();
+      buildMap();
+    }
+    const geoAfter = Object.keys(GEO).length;
+    for (const m of MAPS){
+      currentMap = m;
+      applyMapData();
+      buildMap();
+    }
+    const geoAfter2 = Object.keys(GEO).length;
+    test('GEO cache stable after 6 maps', geoAfter2 === geoAfter);
+    currentMap = MAPS[0];
+    applyMapData();
   }
 
   console.log('%cTEST ' + (pass === total ? 'PASS' : 'FAIL') + ' (' + pass + '/' + total + ')', 'font-size:16px;font-weight:bold;color:' + (pass === total ? '#2ecc71' : '#e74c3c'));
