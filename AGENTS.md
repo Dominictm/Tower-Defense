@@ -76,6 +76,44 @@
 
 **Спека:** `D:\game\docs\specs\визуальное-улучшение-дизайна-2026-09-14.md` — реализована.
 
+## Текущая задача (перенос UI + bake-рендер)
+
+**Спека:** `D:\game\docs\specs\перенос-ui-и-bake-рендера-2026-09-14.md` — конвейер пройден
+(2 прохода ролей Аналитик → Системный аналитик → Дизайнер → Разработчик → Тестировщик →
+Финальный аналитик), **реализована** (по явному разрешению). Автотесты: **694/694 (Node) +
+727/727 (DOM-mock) PASS.** Браузерный визуальный чек/FPS-смоук — предстоит.
+
+Реализовано в `D:\game\index.html`:
+- UI из `tower-defense-astra.html`: topbar, command-бар с dock из 5 карточек (не плавающая
+  панель), инспектор справа (`#inspector`), нативные `<dialog>` (game-over/справка), toast,
+  footer-hints, автопауза по `visibilitychange`, keyboard (1–5/Пробел/Esc/R), старт-экран.
+- Док-флоу: `chooseType` → build по слоту через raycast-пикер; floaters-слои и счётчики
+  визуализации удалены вместе с `#build-panel`/`#tower-panel`, `positionPanel`/`screenPos`.
+- SVG-иконки башен: в `TOWERS[]` добавлены `css` (hex) и `tag`; иконки — inline `icon(id)`.
+- Bake-рендер: `worldMat` (MeshStandardMaterial vertexColors flatShading), `bake()` на
+  `toNonIndexed`/`clone(true)`; кеши `towerGeo` (15: база+топ раздельно, turret у cannon),
+  `actorCache` (5: static-bake + pivots leg/arm/wing/jaw вне bake), `mapGeo` (3 по `map.id` +
+  GEO-по-кэшу, `_cached` в `disposeObj`), призрак `buildTowerMesh(td,1,'ghost')` с прозрачными
+  материалами 0.44; частицы `particles` → `InstancedMesh` (200, `DynamicDrawUsage`).
+- Инварианты API сохранены: `tower.mesh.userData.ring` (+`userData.height`, `userData.turret`),
+  `monster.userData.parts` (+`hp`), HP-бары Sprite CanvasTexture, range-ring 0x3ddc63 op .18.
+- Тесты адаптированы под bake: model smoke (buildMonsterMesh/buildTowerMesh/buildMap), кеши
+  стабильны, `fireProjectileTest` (children/типы 4 снарядов), UI smoke (dock 5 карточек,
+  элементы существуют, toast `.show`), карты/пути, чистые функции (без изменений).
+- DOM-mock в `verify-models.cjs` расширен: Geo (`index`, `toNonIndexed`, `applyMatrix4`, `setAttribute`,
+  `computeBoundingSphere`, `clone(deep)`), `Float32BufferAttribute`, `MeshStandardMaterial`,
+  `InstancedMesh`/`setMatrixAt`/`setColorAt`, `DynamicDrawUsage`, document с registry
+  `getElementById` + Set-based classList stubs, `setTimeout`/`performance`/`window`.
+- **Исправленный баг старта** (нашёл headless-прозвон): `btn.dataset = { type: t.id }` в `buildDock`
+  бросал `TypeError` в реальном браузере (`dataset` — read-only getter), module-скрипт падал до `init()`,
+  кнопка «Старт» не имела обработчика. Заменено на `btn.dataset.type = t.id`. DOM-mock этот баг
+  пропустил, т.к. `dataset: {}` был обычным объектом (разрешал перезапись) — учёт на будущее:
+  DOM-mock stubs должны повторять read-only геттеры реальных HTMLElement.
+- Прозвон: `C:\Users\Dominic\AppData\Local\Temp\opencode\cdp-test.cjs` (headless Chrome + CDP)
+  подтверждает: dock=5 карточек, клик по «Старт» → старт-экран скрыт, волна идёт (отсчёт 12→8 с).
+
 ## Следующие шаги
-1. Ожидаем явного указания пользователя для дальнейших задач.
-2. При необходимости — UI-чек-лист, responsive, визуальная отладка в браузере.
+1. Браузерный чек: `?test=1` в реальной странице, FPS-смоук ≥50, визуальная отладка
+   (dock каретки, hover, ghost, инспектор, диалоги, автопауза, responsive ≤1100/≤760).
+2. Возможные мелочи: пустая заглушка `updateMapNameUI_(){}` в index.html (безвредна, удалить при случае).
+3. Ожидаем явного указания пользователя для дальнейших задач.
